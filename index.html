@@ -49,7 +49,7 @@ button.primary{background:#f1f1ed;color:#17181a;border-color:#f1f1ed}button.prim
  <div class="scan-dialog"><div class="scan-head"><div><h2 id="scanTitle">Guided cube scan</h2><div class="scan-step" id="scanStep">Step 1 of 6 · Hold steady</div></div><button id="scanClose">Close ×</button></div>
  <p class="scan-note">Allow camera access, then follow the spoken prompts and arrows. Keep the whole 3×3 face inside the guide and hold still for two seconds; the camera will capture it automatically. You will be guided to turn the cube to reveal the faces the camera cannot see. Bright, even light works best. Camera images stay in your browser.</p>
  <div class="scan-layout"><div><div class="camera-frame"><video id="scanVideo" autoplay playsinline muted></video><div class="camera-grid" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div><div class="scan-buttons"><button id="cameraStart" class="primary">Start guided scan</button><button id="voiceListen">🎙 Start voice commands</button></div></div>
- <div><div class="scan-note" id="faceGuide"><strong>U face:</strong> Hold the Up face toward the camera, with the back edge at the top and front edge at the bottom.</div><div class="scan-preview" id="scanPreview"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div><div class="scan-faces" id="scanFaces"><span data-face="U">U</span><span data-face="R">R</span><span data-face="F">F</span><span data-face="D">D</span><span data-face="L">L</span><span data-face="B">B</span></div>
+ <div><div id="turnArrow" aria-hidden="true">⬆️</div><div id="holdCountdown">Camera not started</div><div class="scan-note" id="faceGuide"><strong>U face:</strong> Hold the Up face toward the camera, with the back edge at the top and front edge at the bottom.</div><div class="scan-preview" id="scanPreview"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div><div class="scan-faces" id="scanFaces"><span data-face="U">U</span><span data-face="R">R</span><span data-face="F">F</span><span data-face="D">D</span><span data-face="L">L</span><span data-face="B">B</span></div>
  <div class="scan-buttons"><button id="repeatPrompt">🔊 Repeat instructions</button><button id="nextFace" class="primary">Continue</button></div><div class="scan-note" id="scanMessage" aria-live="polite">Start the camera to begin. Say “help”, “repeat”, or “next” after enabling voice commands.</div><div id="scanSolution" hidden></div></div></div></div></section>
 </main>
 <script type="module">
@@ -133,19 +133,252 @@ const prompts=[
 ];
 function scanMessage(t){document.querySelector('#scanMessage').textContent=t}
 function speak(t){if(!('speechSynthesis' in window))return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.rate=.94;u.pitch=1;window.speechSynthesis.speak(u)}
-function updateScanUI(){const step=prompts[scanIndex];document.querySelector('#scanStep').textContent='Step '+(scanIndex+1)+' of 6 · '+step.title;document.querySelector('#faceGuide').innerHTML='<strong>'+step.title+':</strong> '+step.direction+'<br><br><strong>Why:</strong> '+step.why;document.querySelector('#turnArrow').textContent=step.arrow;document.querySelectorAll('#scanFaces span').forEach(el=>el.classList.toggle('done',!!capturedFaces[el.dataset.face]));document.querySelector('#nextFace').textContent=scanIndex===5?'Finish scan':'Continue';document.querySelector('#scanPreview').querySelectorAll('span').forEach((el,i)=>el.style.background=currentSamples?currentSamples[i].css:(capturedFaces[step.face]?.[i]?.css||'#303239'))}
-async function stopCamera(){scanRunning=false;if(autoTimer){clearTimeout(autoTimer);autoTimer=null}if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null}scanVideo.srcObject=null;document.querySelector('#holdCountdown').textContent='Camera stopped.'}
-function sampleVideoFace(){if(!scanVideo.videoWidth||!scanVideo.videoHeight)throw new Error('Camera is not ready yet.');const cv=document.createElement('canvas'),ctx=cv.getContext('2d',{willReadFrequently:true});cv.width=scanVideo.videoWidth;cv.height=scanVideo.videoHeight;ctx.translate(cv.width,0);ctx.scale(-1,1);ctx.drawImage(scanVideo,0,0,cv.width,cv.height);const samples=[],x0=cv.width*.1,y0=cv.height*.1,w=cv.width*.8/3,h=cv.height*.8/3;for(let row=0;row<3;row++)for(let col=0;col<3;col++){const cx=x0+(col+.5)*w,cy=y0+(row+.5)*h,rad=Math.max(2,Math.floor(Math.min(w,h)*.07));const data=ctx.getImageData(Math.max(0,Math.floor(cx-rad)),Math.max(0,Math.floor(cy-rad)),rad*2,rad*2).data;let rr=0,gg=0,bb=0,n=0;for(let i=0;i<data.length;i+=4){rr+=data[i];gg+=data[i+1];bb+=data[i+2];n++}rr/=n;gg/=n;bb/=n;samples.push({rgb:[rr,gg,bb],css:'rgb('+Math.round(rr)+','+Math.round(gg)+','+Math.round(bb)+')'})}return samples}
-function autoCapture(){if(!scanRunning||!scanStream)return;let left=2;const box=document.querySelector('#holdCountdown');box.textContent='Hold still… '+left;autoTimer=setInterval(()=>{left--;if(left>0){box.textContent='Hold still… '+left;return}clearInterval(autoTimer);autoTimer=null;try{capturedFaces[prompts[scanIndex].face]=sampleVideoFace();currentSamples=capturedFaces[prompts[scanIndex].face];updateScanUI();box.textContent='Face captured automatically ✓';scanMessage('Captured '+prompts[scanIndex].title+'. '+(scanIndex<5?'Follow the arrow and spoken direction to show the next side.':'All six views captured; checking color consistency.'));if('speechSynthesis'in window)speak(scanIndex<5?'Face captured. '+prompts[scanIndex+1].direction:'All six views captured. Checking the scan now.');document.querySelector('#nextFace').disabled=false;}catch(e){box.textContent='Could not capture';scanMessage(e.message)}} ,1000)}
-async function beginGuided(){try{if(!navigator.mediaDevices?.getUserMedia)throw new Error('Camera access needs HTTPS or localhost. Open the published HTTPS site.');await stopCamera();scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:960}},audio:false});scanVideo.srcObject=scanStream;await scanVideo.play();scanRunning=true;scanIndex=0;capturedFaces={};currentSamples=null;document.querySelector('#scanSolution').hidden=true;updateScanUI();document.querySelector('#nextFace').disabled=true;scanMessage('Camera ready. Hold the front face steady inside the guide for two seconds.');speak('Welcome to RubiksCube for Idiots. Hold one face steady in the guide. I will capture it automatically after two seconds.');autoCapture()}catch(e){scanMessage('Could not start camera: '+(e.message||e)+'. Check browser camera permission and close other apps using the camera.')}}
-document.querySelector('#cameraScan').addEventListener('click',()=>{scanBackdrop.classList.add('open');scanIndex=0;updateScanUI()});
-document.querySelector('#scanClose').addEventListener('click',async()=>{await stopCamera();scanBackdrop.classList.remove('open');if(voiceRecognition)try{voiceRecognition.stop()}catch(e){}});
-document.querySelector('#cameraStart').addEventListener('click',beginGuided);
-document.querySelector('#repeatPrompt').addEventListener('click',()=>{const p=prompts[scanIndex];speak(p.direction+' Why: '+p.why);scanMessage(p.direction+' Why: '+p.why)});
-document.querySelector('#nextFace').addEventListener('click',()=>{if(!capturedFaces[prompts[scanIndex].face]){scanMessage('Wait for the automatic capture before continuing.');return}if(scanIndex<5){scanIndex++;currentSamples=null;updateScanUI();document.querySelector('#nextFace').disabled=true;const p=prompts[scanIndex];scanMessage(p.direction+' Why: '+p.why);speak(p.direction+' '+p.why);autoCapture();return}finishScan()});
-function finishScan(){const out=document.querySelector('#scanSolution');out.hidden=false;const missing=prompts.filter(p=>!capturedFaces[p.face]);if(missing.length){scanMessage('Some views are missing. Follow the prompts to capture all six sides.');return}const centers={};for(const p of prompts)centers[p.face]=capturedFaces[p.face][4].rgb;const dist=(a,b)=>Math.sqrt((a[0]-b[0])**2+(a[1]-b[1])**2+(a[2]-b[2])**2);const counts={};for(const p of prompts)for(const sample of capturedFaces[p.face]){let best='F',d0=Infinity;for(const q of prompts){const d=dist(sample.rgb,centers[q.face]);if(d<d0){best=q.face;d0=d}}counts[best]=(counts[best]||0)+1}const plausible=prompts.every(p=>counts[p.face]===9);out.innerHTML='<h3>Scan captured</h3><div class="scan-result">'+(plausible?'The six views were captured. Color grouping looks plausible, but this is not yet a verified legal cube state.':'The color grouping is inconsistent (likely lighting, glare, or orientation). Please repeat the guided scan in even light.')+'</div><p class="scan-note">'+(plausible?'The next stage is to map sticker positions across all views and validate a legal cube state before generating trusted solving moves. This prototype does not yet calculate a reliable physical-cube solution.':'Try a matte, evenly lit cube, hold each face flat in the guide, and avoid reflections. The current color sampler is a prototype and can confuse similar colors.')+'</p><div class="scan-buttons"><button id="scanRestart" class="primary">Scan again</button></div>';document.querySelector('#scanRestart').onclick=()=>{scanIndex=0;capturedFaces={};currentSamples=null;out.hidden=true;beginGuided()};scanMessage('Guided scan finished. Review the result before relying on the detected colors.');speak(plausible?'Scan complete. The colors look plausible, but a verified solver is not connected yet.':'Some colors were inconsistent. Please scan again with better lighting.');}
-function enableVoice(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){scanMessage('Voice recognition is not supported in this browser. Try Chrome or Edge.');return}if(voiceRecognition){try{voiceRecognition.stop()}catch(e){}}voiceRecognition=new SR();voiceRecognition.lang='en-US';voiceRecognition.continuous=true;voiceRecognition.interimResults=false;voiceRecognition.onresult=e=>{const text=e.results[e.results.length-1][0].transcript.toLowerCase().trim();scanMessage('Heard: “'+text+'”');if(/\b(help|what can i say|commands)\b/.test(text)){speak('You can say repeat, explain, next, start camera, or close scanner. Say next only after the automatic capture.');return}if(/\b(repeat|again|why)\b/.test(text)){document.querySelector('#repeatPrompt').click();return}if(/\b(next|continue|done)\b/.test(text)){document.querySelector('#nextFace').click();return}if(/\b(start|open) camera\b/.test(text)){beginGuided();return}if(/\b(close|stop camera)\b/.test(text)){stopCamera();return}if(/\b(slower|slow down)\b/.test(text)){if('speechSynthesis'in window)speechSynthesis.cancel();speak('I will explain one step at a time. Say repeat if you need the instruction again.');return}if(/\b(what is|how do|how to|explain)\b/.test(text)){speak('The arrow shows how to reorient the whole cube so I can see a side that is hidden. Keep the cube steady in the guide for two seconds. Say repeat to hear this step again.')}};voiceRecognition.onerror=e=>{if(e.error!=='no-speech')scanMessage('Voice recognition: '+e.error+'. You can still use the buttons.')};voiceRecognition.onend=()=>{if(voiceOn&&scanBackdrop.classList.contains('open'))try{voiceRecognition.start()}catch(e){}};voiceOn=true;try{voiceRecognition.start();scanMessage('Voice commands are listening. Say “help”, “repeat”, or “next”.')}catch(e){scanMessage('Could not start voice recognition. Check microphone permission.')}}
-document.querySelector('#voiceListen').addEventListener('click',enableVoice);document.querySelector('#voiceToggle').addEventListener('click',()=>{scanBackdrop.classList.add('open');enableVoice();speak('Voice help is ready. Say help to hear the commands.')});
+function updateScanUI() {
+  const step = prompts[scanIndex];
+
+  document.querySelector('#scanStep').textContent =
+    'Step ' + (scanIndex + 1) + ' of 6 · ' + step.title;
+
+  document.querySelector('#faceGuide').innerHTML =
+    '<strong>' + step.title + ':</strong> ' + step.direction +
+    '<br><br><strong>Why:</strong> ' + step.why;
+
+  // The arrow element is optional in the current HTML.
+  const arrow = document.querySelector('#turnArrow');
+  if (arrow) {
+    arrow.textContent = step.arrow;
+  }
+
+  document.querySelectorAll('#scanFaces span').forEach(el => {
+    el.classList.toggle('done', !!capturedFaces[el.dataset.face]);
+  });
+
+  document.querySelector('#nextFace').textContent =
+    scanIndex === 5 ? 'Finish scan' : 'Continue';
+
+  document.querySelector('#scanPreview')
+    .querySelectorAll('span')
+    .forEach((el, i) => {
+      el.style.background = currentSamples
+        ? currentSamples[i].css
+        : (capturedFaces[step.face]?.[i]?.css || '#303239');
+    });
+}
+
+
+// Camera controls: request permission, show actionable errors, and release the camera on close.
+const cameraStartBtn = document.querySelector('#cameraStart');
+const scanCloseBtn = document.querySelector('#scanClose');
+const scanMessageEl = document.querySelector('#scanMessage');
+const countdownEl = document.querySelector('#holdCountdown');
+const arrowEl = document.querySelector('#turnArrow');
+const nextFaceBtn = document.querySelector('#nextFace');
+const repeatPromptBtn = document.querySelector('#repeatPrompt');
+const voiceListenBtn = document.querySelector('#voiceListen');
+let holdTimer = null;
+let scanCanvas = document.createElement('canvas');
+let scanCtx = scanCanvas.getContext('2d', {willReadFrequently:true});
+let capturedCount = 0;
+
+function setScanMessage(message) {
+  if (scanMessageEl) scanMessageEl.textContent = message;
+}
+function stopHoldTimer() {
+  if (holdTimer) {
+    clearTimeout(holdTimer);
+    holdTimer = null;
+  }
+}
+function stopCamera() {
+  stopHoldTimer();
+  scanRunning = false;
+  if (scanStream) {
+    scanStream.getTracks().forEach(track => track.stop());
+    scanStream = null;
+  }
+  if (scanVideo) scanVideo.srcObject = null;
+  if (cameraStartBtn) {
+    cameraStartBtn.disabled = false;
+    cameraStartBtn.textContent = 'Start guided scan';
+  }
+  if (countdownEl) countdownEl.textContent = 'Camera stopped';
+}
+function openScanner() {
+  scanBackdrop.classList.add('open');
+  updateScanUI();
+  setScanMessage('Click “Start guided scan” to request camera permission.');
+}
+document.querySelector('#cameraScan')?.addEventListener('click', openScanner);
+
+cameraStartBtn?.addEventListener('click', async () => {
+  cameraStartBtn.disabled = true;
+  cameraStartBtn.textContent = 'Opening camera…';
+  setScanMessage('Requesting camera permission. If your browser asks, choose Allow.');
+  try {
+    if (!window.isSecureContext) {
+      throw new Error('Open the HTTPS GitHub Pages address. Camera access is blocked on most insecure pages.');
+    }
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('This browser does not support camera access. Try a current version of Chrome or Edge.');
+    }
+    if (scanStream) scanStream.getTracks().forEach(track => track.stop());
+    scanStream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {facingMode: {ideal:'environment'}, width:{ideal:1280}, height:{ideal:720}}
+    });
+    scanVideo.srcObject = scanStream;
+    await scanVideo.play();
+    scanRunning = true;
+    cameraStartBtn.textContent = 'Camera running';
+    setScanMessage('Camera is live. Center the full cube face in the guide. Hold it still for two seconds; the view will be captured automatically.');
+    beginTimedCapture();
+  } catch (error) {
+    const help = {
+      NotAllowedError: 'Camera permission was denied. Click the site icon beside the address bar → Site settings → Camera → Allow, then reload.',
+      NotFoundError: 'No camera was found. Connect or enable a webcam.',
+      NotReadableError: 'The camera may be in use by another app. Close other apps or tabs using it, then retry.',
+      OverconstrainedError: 'This camera does not support the requested mode. Try another camera.'
+    };
+    setScanMessage('Could not start camera (' + (error.name || 'Error') + '): ' + (help[error.name] || error.message || String(error)));
+    cameraStartBtn.disabled = false;
+    cameraStartBtn.textContent = 'Try camera again';
+  }
+});
+
+function sampleCurrentFace() {
+  if (!scanVideo || !scanVideo.videoWidth || !scanVideo.videoHeight) {
+    setScanMessage('The camera has not produced a video frame yet. Keep the camera open and try again.');
+    return false;
+  }
+  const w = scanVideo.videoWidth, h = scanVideo.videoHeight;
+  scanCanvas.width = w; scanCanvas.height = h;
+  scanCtx.drawImage(scanVideo, 0, 0, w, h);
+  // Sample the center of each cell in the on-screen 3x3 guide (inner 80% of frame).
+  const samples = [];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      const x = Math.round(w * (0.1 + (col + 0.5) * 0.8 / 3));
+      const y = Math.round(h * (0.1 + (row + 0.5) * 0.8 / 3));
+      const d = scanCtx.getImageData(x, y, 1, 1).data;
+      const css = `rgb(${d[0]}, ${d[1]}, ${d[2]})`;
+      samples.push({css, rgb:[d[0], d[1], d[2]]});
+    }
+  }
+  currentSamples = samples;
+  capturedFaces[prompts[scanIndex].face] = samples;
+  capturedCount = Object.keys(capturedFaces).length;
+  document.querySelectorAll('#scanPreview span').forEach((el, i) => {
+    el.style.background = samples[i].css;
+  });
+  document.querySelectorAll('#scanFaces span').forEach(el => {
+    el.classList.toggle('done', !!capturedFaces[el.dataset.face]);
+  });
+  return true;
+}
+function beginTimedCapture() {
+  stopHoldTimer();
+  if (!scanRunning) return;
+  let seconds = 2;
+  if (countdownEl) countdownEl.textContent = 'Hold still: ' + seconds + ' seconds';
+  const tick = () => {
+    if (!scanRunning) return;
+    seconds--;
+    if (seconds > 0) {
+      if (countdownEl) countdownEl.textContent = 'Hold still: ' + seconds + ' second';
+      holdTimer = setTimeout(tick, 1000);
+      return;
+    }
+    if (sampleCurrentFace()) {
+      if (countdownEl) countdownEl.textContent = 'Captured ' + prompts[scanIndex].title + ' ✓';
+      setScanMessage('Captured this view. Check the nine sampled squares, then click Continue when you are ready to show the next side.');
+      speak('View captured. ' + prompts[scanIndex].title + ' recorded.');
+    }
+  };
+  holdTimer = setTimeout(tick, 1000);
+}
+function announceCurrentPrompt() {
+  const step = prompts[scanIndex];
+  if (arrowEl) arrowEl.textContent = step.arrow;
+  speak(step.title + '. ' + step.direction + ' Why: ' + step.why);
+}
+nextFaceBtn?.addEventListener('click', () => {
+  if (!scanRunning) {
+    setScanMessage('Start the camera first. Then the scanner can capture each view.');
+    return;
+  }
+  const currentFace = prompts[scanIndex].face;
+  if (!capturedFaces[currentFace]) {
+    setScanMessage('Wait for the two-second capture to finish before continuing.');
+    return;
+  }
+  if (scanIndex < prompts.length - 1) {
+    scanIndex++;
+    updateScanUI();
+    announceCurrentPrompt();
+    setScanMessage('Now show the ' + prompts[scanIndex].title.toLowerCase() + '. The camera will capture it after two seconds.');
+    beginTimedCapture();
+  } else {
+    stopHoldTimer();
+    setScanMessage('All six views have been sampled. This prototype displays sampled colors; it does not yet reliably reconstruct or solve a physical cube.');
+    if (countdownEl) countdownEl.textContent = 'Scan complete: ' + capturedCount + '/6 views';
+    speak('Scan complete. The captured colors are ready for review. A full cube reconstruction and solving engine is still needed.');
+  }
+});
+repeatPromptBtn?.addEventListener('click', announceCurrentPrompt);
+scanCloseBtn?.addEventListener('click', () => {
+  stopCamera();
+  scanBackdrop.classList.remove('open');
+});
+scanBackdrop?.addEventListener('click', event => {
+  if (event.target === scanBackdrop) {
+    stopCamera();
+    scanBackdrop.classList.remove('open');
+  }
+});
+
+// Speech recognition is optional; speech synthesis remains available for spoken prompts.
+voiceListenBtn?.addEventListener('click', () => {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    setScanMessage('Voice commands are not supported in this browser. Try Chrome or Edge; you can still use the buttons.');
+    return;
+  }
+  if (voiceRecognition && voiceOn) {
+    voiceRecognition.stop();
+    voiceOn = false;
+    voiceListenBtn.textContent = '🎙 Start voice commands';
+    setScanMessage('Voice commands stopped.');
+    return;
+  }
+  voiceRecognition = new SpeechRecognition();
+  voiceRecognition.lang = 'en-US';
+  voiceRecognition.continuous = true;
+  voiceRecognition.interimResults = false;
+  voiceRecognition.onresult = event => {
+    const text = event.results[event.results.length - 1][0].transcript.toLowerCase();
+    setScanMessage('Heard: “' + text + '”');
+    if (/\b(repeat|again|why|help)\b/.test(text)) announceCurrentPrompt();
+    else if (/\b(next|continue|done)\b/.test(text)) nextFaceBtn?.click();
+    else if (/\b(stop|close)\b/.test(text)) {
+      stopCamera();
+      scanBackdrop.classList.remove('open');
+    }
+    else if (/\b(start|camera|scan)\b/.test(text) && !scanRunning) cameraStartBtn?.click();
+  };
+  voiceRecognition.onerror = event => setScanMessage('Voice recognition issue: ' + event.error + '. You can still use the on-screen buttons.');
+  voiceRecognition.onend = () => {
+    voiceOn = false;
+    if (voiceListenBtn) voiceListenBtn.textContent = '🎙 Start voice commands';
+  };
+  voiceRecognition.start();
+  voiceOn = true;
+  voiceListenBtn.textContent = 'Stop voice commands';
+  setScanMessage('Voice commands are listening. Try “repeat”, “why”, “next”, or “help”.');
+  speak('Voice commands are ready. Say repeat, why, next, or help.');
+});
+
+// Keep initial prompt labels in sync when the page opens.
+updateScanUI();
 
 
 </script>
