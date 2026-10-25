@@ -44,6 +44,10 @@ h1,h2,h3,p{margin-top:0}
 .grid-cross{stroke:var(--lime);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none}
 .camera-overlay-label{position:absolute;left:12px;top:12px;padding:7px 10px;border:1px solid #c9f36b70;border-radius:9px;background:#10140edb;color:#e7ffc0;font-size:10px;font-weight:850;letter-spacing:.1em;text-transform:uppercase;pointer-events:none;backdrop-filter:blur(8px)}
 .live-indicator{position:absolute;right:12px;top:12px;display:flex;align-items:center;gap:6px;padding:7px 9px;border-radius:99px;background:#101114c9;border:1px solid #ffffff19;color:#cbd0d7;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;pointer-events:none}
+[hidden]{display:none!important}
+button:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
+.camera-frame{--ar:1.3333;width:min(100%,calc(70vh * var(--ar)));margin-inline:auto}
+#cameraError .hint{display:block;margin-top:6px;color:#f3c1c1;font-size:11px}
 #cameraError{display:none;margin-top:10px;padding:12px 14px;border:1px solid #774148;background:#291b20;border-radius:12px;color:#ffd4d4;font-size:12px;line-height:1.6}
 .camera-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .camera-actions button{flex:1 1 auto}
@@ -87,7 +91,7 @@ h1,h2,h3,p{margin-top:0}
 .footer-note{text-align:center;color:#727987;font-size:10px;padding:14px 12px 4px;line-height:1.5}
 .toast{position:fixed;left:50%;bottom:22px;z-index:50;transform:translate(-50%,12px);opacity:0;pointer-events:none;background:#262b31;border:1px solid #4a515c;border-radius:13px;padding:11px 15px;font-size:12px;color:#f2f5f8;box-shadow:0 10px 30px #0007;transition:opacity .2s,transform .2s;max-width:min(600px,92vw);text-align:center}
 .toast.show{opacity:1;transform:translate(-50%,0)}
-@media(max-width:980px){.workspace{grid-template-columns:minmax(0,1fr);}.camera-inner{padding-bottom:18px}.camera-frame{max-height:56vh}#cubeStage{height:360px}.digital-panel{min-height:600px}.topbar{height:66px}}
+@media(max-width:980px){.workspace{grid-template-columns:minmax(0,1fr);}.camera-inner{padding-bottom:18px}.camera-frame{width:min(100%,calc(56vh * var(--ar)))}#cubeStage{height:360px}.digital-panel{min-height:600px}.topbar{height:66px}}
 @media(max-width:560px){.topbar{padding:0 12px}.brand{font-size:10px;letter-spacing:.08em}.top-right .pill:first-child{display:none}main{padding:10px}.panel-head{padding:16px 15px 12px}.camera-inner{padding:0 10px 12px}.camera-actions button{font-size:11px;padding:10px 9px}.workspace{gap:10px}.panel{border-radius:15px}#cubeStage{height:300px;min-height:250px}.instruction-card{margin:0 10px 12px;padding:13px}.step-arrow{width:48px;height:48px;flex-basis:48px;font-size:28px}.step-title{font-size:14px}.step-text{font-size:12px}}
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/","three/":"https://cdn.jsdelivr.net/npm/three@0.165.0/"}}</script>
@@ -115,13 +119,15 @@ h1,h2,h3,p{margin-top:0}
      <div class="camera-overlay-label">ALIGN STICKER FACE</div>
      <div class="live-indicator"><i class="dot" id="videoDot"></i><span id="videoLabel">WAITING FOR CAMERA</span></div>
     </div>
-    <div id="cameraError"></div>
+    <div id="cameraError" role="alert"></div>
     <div class="camera-actions">
-     <button class="primary" id="startCamera">Start camera</button>
+     <button class="primary" id="startCamera">Scan cube</button>
+     <button class="primary" id="retryCamera" hidden>Retry camera</button>
      <button id="captureNow" disabled>Capture face now</button>
+     <button class="subtle small" id="switchCamera" hidden>Switch camera</button>
      <button class="subtle small" id="resetGrid" disabled>Reset grid</button>
     </div>
-    <div id="cameraStatus">Turn the camera on. Place one complete face inside the green grid and keep the cube still. Capture starts automatically after a stable view; you can also capture manually.</div>
+    <div id="cameraStatus" aria-live="polite">Press “Scan cube” to turn on the camera. Your browser will ask for permission; video never leaves your device.</div>
     <div class="face-preview-header"><strong>Sticker sample preview</strong><span id="previewFaceLabel">No face captured</span></div>
     <div class="face-preview" id="facePreview">
      <button type="button" title="Capture a face first" disabled>—</button><button type="button" disabled>—</button><button type="button" disabled>—</button>
@@ -158,102 +164,21 @@ h1,h2,h3,p{margin-top:0}
 
 
 <script>
-/* Camera safety net: this plain script still runs if the 3D ES module fails to import. */
-(() => {
-  window.__cameraLabModuleReady = false;
-  window.__cameraFallbackRunning = false;
-  const $ = selector => document.querySelector(selector);
-  const button = $('#startCamera');
-  const video = $('#cameraVideo');
-  const status = $('#cameraStatus');
-  const errorBox = $('#cameraError');
-  const pillText = $('#cameraPillText');
-  const cameraDot = $('#cameraDot');
-  const liveText = $('#liveText');
-  const liveDot = $('#liveDot');
-  const videoLabel = $('#videoLabel');
-  const videoDot = $('#videoDot');
-  const capture = $('#captureNow');
-  const resetGrid = $('#resetGrid');
-  let stream = null;
-
-  function showError(message) {
-    errorBox.style.display = 'block';
-    errorBox.textContent = message;
-  }
-  function setLive(live) {
-    pillText.textContent = live ? 'Camera live · fallback' : 'Camera idle';
-    cameraDot.className = 'dot' + (live ? ' live' : '');
-    liveText.textContent = live ? 'Live · fallback' : 'Offline';
-    liveDot.className = 'dot' + (live ? ' live' : '');
-    videoLabel.textContent = live ? 'CAMERA LIVE · 3D SCRIPT FAILED' : 'WAITING FOR CAMERA';
-    videoDot.className = 'dot' + (live ? ' live' : '');
-  }
-
-  // Default guide shown even if the module failed before drawing its perspective grid.
-  const polygon = $('#gridPolygon');
-  const lines = $('#gridLines');
-  if (polygon && !polygon.getAttribute('points')) {
-    polygon.setAttribute('points', '140,85 860,85 860,665 140,665');
-    const ns = 'http://www.w3.org/2000/svg';
-    [[380,85,380,665],[620,85,620,665],[140,278,860,278],[140,472,860,472]].forEach(([x1,y1,x2,y2]) => {
-      const line = document.createElementNS(ns,'line');
-      line.setAttribute('x1',x1);line.setAttribute('y1',y1);
-      line.setAttribute('x2',x2);line.setAttribute('y2',y2);
-      line.setAttribute('class','gridline');lines.appendChild(line);
-    });
-  }
-
-  button?.addEventListener('click', async () => {
-    if (window.__cameraLabModuleReady) return; // Normal module handler owns the working app.
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      stream = null;video.srcObject = null;window.__cameraFallbackRunning = false;
-      button.textContent = 'Start camera';button.disabled = false;
-      capture.disabled = true;resetGrid.disabled = true;setLive(false);
-      status.textContent = 'Camera stopped. Reload the page after the module import is fixed.';
-      return;
-    }
-    errorBox.style.display = 'none';errorBox.textContent = '';
-    button.disabled = true;button.textContent = 'Opening camera…';
-    status.textContent = 'Requesting camera permission from your browser…';
-    try {
-      if (!window.isSecureContext) throw new Error('Open the published HTTPS website, not a file:// or http:// address.');
-      if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser does not expose webcam access. Try a current version of Chrome or Edge.');
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio:false,
-        video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}
-      });
-      video.srcObject = stream;
-      await video.play();
-      window.__cameraFallbackRunning = true;
-      setLive(true);
-      button.disabled = false;button.textContent = 'Stop camera';
-      capture.disabled = false;resetGrid.disabled = false;
-      status.textContent = 'The webcam is working, but the 3D module did not initialize. This fallback proves camera access works; reload after the import fix to enable automatic capture and the digital twin.';
-    } catch (e) {
-      const messages = {
-        NotAllowedError:'Permission was denied or blocked. Click the site icon beside the address bar → Site settings → Camera → Allow, then reload.',
-        NotFoundError:'No webcam was found. Connect or enable a camera, or choose a different device.',
-        NotReadableError:'The webcam is already being used by another app or browser tab. Close it there and retry.',
-        OverconstrainedError:'The selected camera mode is not supported. Try another camera.'
-      };
-      showError('Camera could not start ('+(e.name||'Error')+'): '+(messages[e.name]||e.message||String(e)));
-      status.textContent = 'Camera unavailable. Use the message above to identify the reason.';
-      button.disabled = false;button.textContent = 'Try camera again';
-      stream = null;
-    }
-  });
-
-  window.addEventListener('pagehide', () => {
-    if (stream) stream.getTracks().forEach(track => track.stop());
-  });
-})();
+/* Load guard: if the main module can't load (offline / CDN blocked), say so instead of failing silently.
+   It never touches the camera, so it can't compete with the real scanner. */
+window.addEventListener('load',()=>setTimeout(()=>{
+  if(window.__cameraLabModuleReady)return;
+  const box=document.getElementById('cameraError'),btn=document.getElementById('startCamera');
+  box.style.display='block';
+  box.textContent="The app couldn't finish loading, so the camera can't start yet. Check your internet connection and reload.";
+  btn.textContent='Reload page';btn.onclick=()=>location.reload();
+},300));
 </script>
 
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CameraController } from './js/camera.js';
 
 const $ = s => document.querySelector(s);
 const faceOrder = ['F','R','B','L','U','D'];
@@ -278,6 +203,7 @@ let scanIndex=0, scanStream=null, scanTimer=null, lastSignature=null, stableSinc
 let scanPaused=true, capturedFaces={}, previewFace=null, pendingSamples=null, pendingWarning='';
 let videoAspect=4/3, viewHeight=750, guidePoints=[], dragCorner=-1, captureBusy=false, finalValidation=null;
 let digitalHistory=[], virtualBusy=false;
+let rejectedCenterRGB=null; // was used by monitorCamera() but never declared -> crashed auto-capture every tick
 
 // ---------- Responsive perspective grid ----------
 const svgNS='http://www.w3.org/2000/svg';
@@ -563,7 +489,8 @@ function getFaceQuality(image,samples){
 }
 function currentImage(){
  if(!video.videoWidth||!video.videoHeight)return null;
- if(canvas.width!==video.videoWidth||canvas.height!==video.videoHeight){canvas.width=video.videoWidth;canvas.height=video.videoHeight;}
+ const scale=Math.min(1,640/video.videoWidth),cw=Math.round(video.videoWidth*scale),ch=Math.round(video.videoHeight*scale);
+ if(canvas.width!==cw||canvas.height!==ch){canvas.width=cw;canvas.height=ch;}
  ctx.drawImage(video,0,0,canvas.width,canvas.height);
  return ctx.getImageData(0,0,canvas.width,canvas.height);
 }
@@ -832,42 +759,75 @@ function drawSamplePreview(face){
  if(!face||!capturedFaces[face]){renderPreview(null);return;}
  renderPreview(face);
 }
-async function startCamera(){
- if(scanStream){closeCamera();toast('Camera stopped.');return;}
- clearError();
- try{
-  if(!window.isSecureContext)throw new Error('Open the secure https:// GitHub Pages address, not a local file or an http:// page.');
-  if(!navigator.mediaDevices?.getUserMedia)throw new Error('This browser does not support camera access. Try an up-to-date Chrome or Edge.');
-  if(scanStream)scanStream.getTracks().forEach(t=>t.stop());
-  scanStream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});
-  video.srcObject=scanStream;await video.play();
-  videoAspect=video.videoWidth/video.videoHeight||4/3;camFrame.style.aspectRatio=`${video.videoWidth}/${video.videoHeight}`;resetGuide();
-  $('#cameraPillText').textContent='Camera live';$('#cameraDot').className='dot live';$('#liveText').textContent='Live';$('#liveDot').className='dot live';$('#videoLabel').textContent='FINDING A FACE';$('#videoDot').className='dot';
-  startCameraBtn.textContent='Stop camera';startCameraBtn.disabled=false;captureNowBtn.disabled=false;$('#resetGrid').disabled=false;
-  scanPaused=false;lastSignature=null;stableSince=0;
-  setCameraStatus('Live. Drag the four green circles to match the cube face corners. The scanner captures after a stable, well-aligned view; Capture face now is the fast manual option.');
+// ---------- Camera lifecycle (all camera access lives in js/camera.js) ----------
+const retryCameraBtn=$('#retryCamera'),switchCameraBtn=$('#switchCamera');
+const PERMISSION_HINT=/iPhone|iPad|iPod/.test(navigator.userAgent)
+ ?'On iPhone/iPad: tap “aA” in the address bar → Website Settings → Camera → Allow, then tap Retry camera.'
+ :'Click the camera or lock icon next to the address bar → allow Camera, then press Retry camera.';
+const camera=new CameraController(video,{onChange:renderCameraState});
+
+function setIndicators(state){
+ const live=state==='live';
+ $('#cameraPillText').textContent={live:'Camera live',starting:'Starting camera…',paused:'Camera paused',error:'Camera problem'}[state]||'Camera idle';
+ $('#cameraDot').className='dot'+(live?' live':state==='error'||state==='paused'?' warn':'');
+ $('#liveText').textContent=live?'Live':state==='starting'?'Starting…':'Offline';
+ $('#liveDot').className='dot'+(live?' live':'');
+ $('#videoLabel').textContent={live:'FINDING A FACE',starting:'STARTING CAMERA…',paused:'PAUSED',error:'CAMERA OFF'}[state]||'WAITING FOR CAMERA';
+ $('#videoDot').className='dot'+(state==='error'?' warn':'');
+}
+// Keep the frame's aspect equal to the real video so the grid sits on the real stickers (no stretching).
+function fitCameraFrame(){
+ if(!video.videoWidth||!video.videoHeight)return;
+ const aspect=video.videoWidth/video.videoHeight;
+ camFrame.style.setProperty('--ar',aspect);camFrame.style.aspectRatio=`${video.videoWidth}/${video.videoHeight}`;
+ // Only reset the guide when the shape really changed (e.g. phone rotated), so dragged handles survive.
+ if(Math.abs(aspect-videoAspect)>.01||!guidePoints.length){videoAspect=aspect;resetGuide();}
+}
+async function updateSwitchButton(){
+ const cams=await camera.listCameras();
+ switchCameraBtn.hidden=!(camera.state==='live'&&cams.length>1);
+}
+function renderCameraState({state,error}){
+ scanStream=camera.stream;
+ if(state!=='live'&&scanTimer){clearInterval(scanTimer);scanTimer=null;}
+ setIndicators(state);
+ const busy=state==='starting',live=state==='live';
+ startCameraBtn.hidden=state==='error';
+ retryCameraBtn.hidden=state!=='error';
+ startCameraBtn.disabled=busy;
+ startCameraBtn.textContent=busy?'Starting camera…':live?'Stop camera':'Scan cube';
+ captureNowBtn.disabled=!live;$('#resetGrid').disabled=!live;
+ if(!live)switchCameraBtn.hidden=true;
+ if(state!=='error')clearError();
+ if(busy){setCameraStatus('Starting camera… If your browser asks, tap “Allow”.');return;}
+ if(live){
+  fitCameraFrame();
+  // Don't auto-capture over a face that's already captured (e.g. after returning to the tab).
+  scanPaused=!!capturedFaces[faceOrder[scanIndex]];lastSignature=null;stableSince=0;
+  setCameraStatus('Live. Hold the cube flat, fill each square of the grid, avoid shadows. It captures by itself when the view is steady, or tap Capture face now.');
   scanTimer=setInterval(monitorCamera,170);
- }catch(e){
-  const guidance={
-   NotAllowedError:'Camera permission is blocked. Click the site icon beside the address bar → Site settings → Camera → Allow, then reload the page.',
-   NotFoundError:'No camera was found. Connect or enable a webcam.',
-   NotReadableError:'The webcam may be in use by another application. Close other camera apps or tabs, then retry.',
-   OverconstrainedError:'That camera mode is not supported. Try another camera.'
-  };
-  showError(`Camera could not start (${e.name||'Error'}): ${guidance[e.name]||e.message||String(e)}`);
-  setCameraStatus('Camera unavailable. The camera panel will remain here until permission/device access is fixed.');
-  startCameraBtn.textContent='Try camera again';startCameraBtn.disabled=false;
+  updateSwitchButton();
+  return;
  }
+ scanPaused=true;
+ if(state==='paused'){setCameraStatus('Camera paused while this tab is in the background. It restarts when you come back.');return;}
+ if(state==='error'){
+  cameraError.style.display='block';cameraError.textContent=error.message;
+  if(error.code==='denied'){const h=document.createElement('span');h.className='hint';h.textContent=PERMISSION_HINT;cameraError.append(h);}
+  setCameraStatus('Your scan progress is kept. Fix the camera and press Retry camera.');
+  retryCameraBtn.focus({preventScroll:true});
+  return;
+ }
+ setCameraStatus('Camera is off. Press “Scan cube” to continue scanning.');
 }
-startCameraBtn.addEventListener('click',startCamera);
-function closeCamera(){
- if(scanTimer){clearInterval(scanTimer);scanTimer=null;}
- if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;}
- video.srcObject=null;scanPaused=true;startCameraBtn.disabled=false;startCameraBtn.textContent='Start camera';
- $('#cameraPillText').textContent='Camera idle';$('#cameraDot').className='dot';$('#liveText').textContent='Offline';$('#liveDot').className='dot';
-}
-window.addEventListener('beforeunload',closeCamera);
-window.addEventListener('resize',()=>{if(video.videoWidth){videoAspect=video.videoWidth/video.videoHeight;resetGuide();}});
+startCameraBtn.addEventListener('click',()=>{
+ if(camera.state==='live'){camera.stop();toast('Camera stopped.');}
+ else camera.start();
+});
+retryCameraBtn.addEventListener('click',()=>camera.start());
+switchCameraBtn.addEventListener('click',()=>camera.switchCamera());
+// Fires when the track's resolution changes, e.g. phone rotated between portrait and landscape.
+video.addEventListener('resize',()=>{if(camera.state==='live')fitCameraFrame();});
 function renderAnimation(){requestAnimationFrame(renderAnimation);orbit.update();renderer.render(scene,camera3d);}
 renderAnimation();
 
