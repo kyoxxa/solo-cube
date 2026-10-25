@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#111214"><title>Solo Cube — 3D Rubik's Cube</title>
+<style>
+:root{color-scheme:dark;--bg:#111214;--panel:#191a1d;--muted:#8d9098;--line:#2a2c31}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#f4f4f5}
+#app{position:relative;width:100%;height:100%;isolation:isolate}canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
+.hud{position:absolute;inset:0;pointer-events:none;display:flex;flex-direction:column;justify-content:space-between;padding:clamp(14px,3vw,30px)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px}.brand{display:flex;align-items:center;gap:10px;font-size:13px;letter-spacing:.15em;text-transform:uppercase;font-weight:750}.mark{width:24px;height:24px;border:1px solid #45474d;border-radius:7px;display:grid;grid-template-columns:repeat(2,1fr);gap:2px;padding:4px;transform:rotate(-8deg)}.mark i{border-radius:2px;background:#f7f7f4}.mark i:nth-child(2){background:#e4473c}.mark i:nth-child(3){background:#20a567}.mark i:nth-child(4){background:#f2c840}
+.status{font-size:11px;letter-spacing:.11em;text-transform:uppercase;color:#9ea0a7;border:1px solid #303238;border-radius:999px;padding:8px 11px;background:#151619cc}
+.bottom{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}.hint{font-size:12px;color:#a4a6ad;line-height:1.7;letter-spacing:.02em}.hint strong{color:#e9e9eb;font-weight:600}.controls{pointer-events:auto;display:flex;gap:8px;align-items:center}
+button{font:inherit;color:#f5f5f6;border:1px solid #373940;background:#1b1c20;border-radius:10px;padding:11px 15px;font-size:12px;font-weight:650;letter-spacing:.025em;cursor:pointer;transition:transform .16s,border-color .16s,background .16s;white-space:nowrap}
+button:hover{border-color:#777a84;background:#25262b}button:active{transform:scale(.97)}button:disabled{opacity:.42;cursor:wait}
+button.primary{background:#f1f1ed;color:#17181a;border-color:#f1f1ed}button.primary:hover{background:#fff}
+.moves{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);pointer-events:auto;display:flex;flex-direction:column;gap:8px;width:min(440px,calc(100vw - 28px));opacity:0;transition:opacity .2s;visibility:hidden}
+.moves.open{opacity:1;visibility:visible}.move-row{display:grid;grid-template-columns:38px repeat(3,1fr);gap:6px}.face-label{display:grid;place-items:center;font-size:12px;font-weight:800;color:#111;border-radius:8px}
+.move-btn{padding:10px 5px;background:#17181cdd;backdrop-filter:blur(12px);border-color:#ffffff24}.move-btn small{display:block;color:#b6b7bd;font-size:9px;margin-top:2px;font-weight:500}
+.move-toggle{position:absolute;right:clamp(14px,3vw,30px);top:70px;pointer-events:auto}
+.toast{position:absolute;top:18%;left:50%;transform:translate(-50%,-8px);opacity:0;transition:.25s;pointer-events:none;background:#202126eF;border:1px solid #3a3b42;padding:10px 14px;border-radius:10px;color:#ededee;font-size:12px;white-space:nowrap}.toast.show{opacity:1;transform:translate(-50%,0)}
+@media(max-width:600px){.bottom{align-items:flex-end}.hint{max-width:47%;font-size:10px}.controls{gap:6px}.controls button{padding:10px 11px;font-size:11px}.brand{font-size:11px}.status{font-size:9px}.moves{top:auto;bottom:80px;transform:translateX(-50%)}.move-toggle{top:62px}}
+</style>
+</head>
+<body><main id="app">
+<div class="hud">
+ <header class="top"><div class="brand"><span class="mark"><i></i><i></i><i></i><i></i></span> SOLO CUBE</div><div class="status" id="status">SOLVED STATE</div></header>
+ <footer class="bottom"><div class="hint"><strong>DRAG</strong> a face to turn · <strong>DRAG OUTSIDE</strong> to orbit<br><strong>SCROLL</strong> to zoom · <strong>U D L R F B</strong> to move · <strong>SHIFT</strong> to reverse</div><div class="controls"><button id="movesToggle">Moves</button><button id="scramble">Scramble ↗</button><button id="solve" class="primary">Solve cube</button></div></footer>
+</div>
+<button class="move-toggle" id="closeMoves" hidden>Close ×</button>
+<section class="moves" id="movePanel" aria-label="Cube move controls"></section>
+<div class="toast" id="toast"></div>
+</main>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/controls/OrbitControls.js';
+
+const app=document.querySelector('#app'), statusEl=document.querySelector('#status'), toastEl=document.querySelector('#toast');
+const scene=new THREE.Scene(); scene.background=new THREE.Color('#111214');
+const camera=new THREE.PerspectiveCamera(34,innerWidth/innerHeight,.1,100); camera.position.set(6.7,6.2,8.4);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.2;app.prepend(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xffffff,0x292b32,2.0));
+const key=new THREE.DirectionalLight(0xffffff,3.1);key.position.set(5,8,7);scene.add(key);
+const fill=new THREE.DirectionalLight(0x9bb9ff,1.1);fill.position.set(-6,3,-5);scene.add(fill);
+const rim=new THREE.DirectionalLight(0xffd8b0,1.4);rim.position.set(1,5,-7);scene.add(rim);
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(200,200),new THREE.ShadowMaterial({opacity:.22}));floor.rotation.x=-Math.PI/2;floor.position.y=-1.53;floor.receiveShadow=true;scene.add(floor);
+renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;key.castShadow=true;key.shadow.mapSize.set(1024,1024);key.shadow.camera.left=-8;key.shadow.camera.right=8;key.shadow.camera.top=8;key.shadow.camera.bottom=-8;
+const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=.075;controls.minDistance=6.5;controls.maxDistance=15;controls.target.set(0,0,0);
+const cubeRoot=new THREE.Group();scene.add(cubeRoot);
+const C={U:'#f3f2eb',D:'#f2cf32',F:'#1ca66a',B:'#2474d9',R:'#d83c36',L:'#ef8a32'};
+const faceDirs={U:[0,1,0],D:[0,-1,0],F:[0,0,1],B:[0,0,-1],R:[1,0,0],L:[-1,0,0]};
+const faceMaterials={};
+for(const [f,col] of Object.entries(C)){const m=new THREE.MeshPhysicalMaterial({color:col,roughness:.24,metalness:.02,clearcoat:.75,clearcoatRoughness:.18});faceMaterials[f]=m;}
+const bodyMat=new THREE.MeshStandardMaterial({color:0x222328,roughness:.31,metalness:.12});
+const cubies=[];const stickerMeshes=[];const cubieSize=.965,spacing=1.005;
+function roundedBoxGeometry(w,h,d,r,segments=3){const shape=new THREE.Shape();const x=-w/2,y=-h/2;shape.moveTo(x+r,y);shape.lineTo(x+w-r,y);shape.quadraticCurveTo(x+w,y,x+w,y+r);shape.lineTo(x+w,y+h-r);shape.quadraticCurveTo(x+w,y+h,x+w-r,y+h);shape.lineTo(x+r,y+h);shape.quadraticCurveTo(x,y+h,x,y+h-r);shape.lineTo(x,y+r);shape.quadraticCurveTo(x,y,x+r,y);const geo=new THREE.ExtrudeGeometry(shape,{depth:d,bevelEnabled:true,bevelSegments:segments,steps:1,bevelSize:r*.45,bevelThickness:r*.45,curveSegments:5});geo.center();return geo;}
+const coreGeo=roundedBoxGeometry(cubieSize,cubieSize,cubieSize,.075,3);
+const stickerGeo=roundedBoxGeometry(.82,.82,.026,.075,4);
+const rotFor={U:new THREE.Euler(-Math.PI/2,0,0),D:new THREE.Euler(Math.PI/2,0,0),F:new THREE.Euler(0,0,0),B:new THREE.Euler(0,Math.PI,0),R:new THREE.Euler(0,Math.PI/2,0),L:new THREE.Euler(0,-Math.PI/2,0)};
+function addSticker(cubie,face){const mesh=new THREE.Mesh(stickerGeo,faceMaterials[face]);mesh.rotation.copy(rotFor[face]);const dir=faceDirs[face];mesh.position.set(dir[0]*.493,dir[1]*.493,dir[2]*.493);mesh.userData={face,cubie};mesh.castShadow=true;mesh.receiveShadow=true;cubie.add(mesh);stickerMeshes.push(mesh);}
+for(let x=-1;x<=1;x++)for(let y=-1;y<=1;y++)for(let z=-1;z<=1;z++){
+ const g=new THREE.Group();g.position.set(x*spacing,y*spacing,z*spacing);g.userData.grid={x,y,z};g.userData.home={x,y,z};g.userData.homeQuat=new THREE.Quaternion();g.add(new THREE.Mesh(coreGeo,bodyMat));g.children[0].castShadow=true;g.children[0].receiveShadow=true;
+ if(y===1)addSticker(g,'U');if(y===-1)addSticker(g,'D');if(z===1)addSticker(g,'F');if(z===-1)addSticker(g,'B');if(x===1)addSticker(g,'R');if(x===-1)addSticker(g,'L');
+ cubies.push(g);cubeRoot.add(g);
+}
+const moveDefs={U:{axis:'y',layer:1,sign:-1},D:{axis:'y',layer:-1,sign:1},L:{axis:'x',layer:-1,sign:1},R:{axis:'x',layer:1,sign:-1},F:{axis:'z',layer:1,sign:-1},B:{axis:'z',layer:-1,sign:1}};
+const moveNames=['U','D','L','R','F','B'];let busy=false,history=[],solved=true,activeLayer=null;
+function setStatus(){statusEl.textContent=solved?'SOLVED STATE':`${history.length} MOVE${history.length===1?'':'S'} FROM START`;}
+function notify(t){toastEl.textContent=t;toastEl.classList.add('show');clearTimeout(notify.timer);notify.timer=setTimeout(()=>toastEl.classList.remove('show'),1600);}
+function moveToken(m){return m.endsWith('2')?m[0]+'2':m.endsWith("'")?m[0]+"'":m;}
+function invertMove(m){if(m.endsWith('2'))return m;if(m.endsWith("'"))return m[0];return m+"'";}
+function turn(m,record=true,duration=190){if(busy)return Promise.resolve(false);const face=m[0],def=moveDefs[face];if(!def)return Promise.resolve(false);const turns=m.endsWith('2')?2:1;const prime=m.endsWith("'");const angle=def.sign*Math.PI/2*(prime?-1:1)*turns;
+ const chosen=cubies.filter(c=>Math.round(c.userData.grid[def.axis])===def.layer);const pivot=new THREE.Group();cubeRoot.add(pivot);chosen.forEach(c=>{cubeRoot.remove(c);pivot.attach(c)});busy=true;controls.enabled=false;
+ return new Promise(resolve=>{const start=performance.now();function frame(now){const t=Math.min(1,(now-start)/duration),ease=1-Math.pow(1-t,3);pivot.rotation[def.axis]=angle*ease;if(t<1){requestAnimationFrame(frame);return}
+ pivot.rotation[def.axis]=angle;pivot.updateMatrixWorld(true);chosen.forEach(c=>{cubeRoot.attach(c);const p=c.position;p.set(Math.round(p.x/spacing)*spacing,Math.round(p.y/spacing)*spacing,Math.round(p.z/spacing)*spacing);const gr=c.userData.grid;const x=gr.x,y=gr.y,z=gr.z;let nx=x,ny=y,nz=z;const q=Math.round(angle/(Math.PI/2));for(let i=0;i<((q%4)+4)%4;i++){if(def.axis==='x'){ny=-nz;nz=y;/* overwritten below */} } // position is authoritative; grid snapped below
+ const gp={x:Math.round(p.x/spacing),y:Math.round(p.y/spacing),z:Math.round(p.z/spacing)};c.userData.grid=gp;
+ });cubeRoot.remove(pivot);if(record)history.push(m);solved=cubies.every(c=>c.position.distanceTo(new THREE.Vector3(c.userData.home.x*spacing,c.userData.home.y*spacing,c.userData.home.z*spacing))<.01 && Math.abs(c.quaternion.dot(c.userData.homeQuat))>.999); // home orientation checked below using face layout
+ if(record){solved=false;}if(history.length===0)solved=true;busy=false;controls.enabled=true;setStatus();resolve(true);}
+ requestAnimationFrame(frame);});
+}
+async function doMove(m,d=190){if(busy)return;await turn(m,true,d);}
+function buildMovePanel(){const panel=document.querySelector('#movePanel');for(const f of moveNames){const row=document.createElement('div');row.className='move-row';const lab=document.createElement('div');lab.className='face-label';lab.textContent=f;lab.style.background=C[f];row.appendChild(lab);for(const suffix of ['',"'",'2']){const b=document.createElement('button');b.className='move-btn';b.style.borderColor=C[f]+'88';b.style.boxShadow='inset 0 0 0 1px '+C[f]+'18';b.innerHTML=`${f}${suffix||''}<small>${suffix===''?'90° CW':suffix==="'"?'90° CCW':'180°'}</small>`;b.onclick=()=>doMove(f+suffix);row.appendChild(b)}panel.appendChild(row)}}
+buildMovePanel();
+document.querySelector('#movesToggle').onclick=()=>{document.querySelector('#movePanel').classList.toggle('open');document.querySelector('#closeMoves').hidden=!document.querySelector('#movePanel').classList.contains('open')};
+document.querySelector('#closeMoves').onclick=()=>{document.querySelector('#movePanel').classList.remove('open');document.querySelector('#closeMoves').hidden=true};
+document.querySelector('#scramble').onclick=async()=>{if(busy)return;history=[];solved=false;const seq=[];let prev='';for(let i=0;i<25;i++){let f;do{f=moveNames[Math.floor(Math.random()*6)]}while(f===prev);prev=f;seq.push(f+['', "'",'2'][Math.floor(Math.random()*3)])}notify('Scrambling · 25 moves');for(const m of seq){while(busy)await new Promise(r=>setTimeout(r,10));await turn(m,true,75)}setStatus();};
+document.querySelector('#solve').onclick=async()=>{if(busy)return;if(!history.length){notify('Already solved');return}const undo=history.slice().reverse().map(invertMove);history=[];notify('Solving cube…');for(const m of undo){while(busy)await new Promise(r=>setTimeout(r,10));await turn(m,false,145)}history=[];solved=true;setStatus();notify('Cube solved');};
+window.addEventListener('keydown',e=>{if(e.repeat||e.ctrlKey||e.metaKey||e.altKey)return;const f=e.key.toUpperCase();if(moveNames.includes(f)){e.preventDefault();doMove(f+(e.shiftKey?"'":''));}if(e.key==='Escape'){document.querySelector('#movePanel').classList.remove('open');document.querySelector('#closeMoves').hidden=true}});
+const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();let down=null,dragKind=null,dragSticker=null,dragFace=null;
+function coords(e){const r=renderer.domElement.getBoundingClientRect();return new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-((e.clientY-r.top)/r.height*2-1))}
+renderer.domElement.addEventListener('pointerdown',e=>{if(busy)return;down={x:e.clientX,y:e.clientY,p:coords(e),id:e.pointerId};raycaster.setFromCamera(down.p,camera);const hit=raycaster.intersectObjects(stickerMeshes,false)[0];dragSticker=hit?.object||null;dragFace=hit?.object.userData.face||null;dragKind=dragSticker?'sticker':'orbit';if(dragSticker){controls.enabled=false;renderer.domElement.setPointerCapture(e.pointerId)}});
+renderer.domElement.addEventListener('pointerup',async e=>{if(!down)return;const dx=e.clientX-down.x,dy=e.clientY-down.y,dist=Math.hypot(dx,dy);if(dragKind==='sticker'&&dist>12&&dragSticker&&!busy){const face=dragFace;const def=moveDefs[face];const worldNormal=new THREE.Vector3(...faceDirs[face]).applyQuaternion(dragSticker.getWorldQuaternion(new THREE.Quaternion()));let axis,sign;const cameraRight=new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion),cameraUp=new THREE.Vector3(0,1,0).applyQuaternion(camera.quaternion);const swipe=new THREE.Vector3().addScaledVector(cameraRight,dx).addScaledVector(cameraUp,-dy);const tangent=new THREE.Vector3().crossVectors(worldNormal,swipe).normalize();const abs=[Math.abs(tangent.x),Math.abs(tangent.y),Math.abs(tangent.z)];const idx=abs.indexOf(Math.max(...abs));axis=['x','y','z'][idx];const coord=dragSticker.userData.cubie.userData.grid[axis];if(Math.abs(coord)===1){let turnFace;if(axis==='x')turnFace=coord>0?'R':'L';if(axis==='y')turnFace=coord>0?'U':'D';if(axis==='z')turnFace=coord>0?'F':'B';const faceAxis=def.axis;let amount=(axis==='x'?tangent.x:axis==='y'?tangent.y:tangent.z);if(axis===faceAxis)turnFace=face;let prime=(amount*(def.sign)>0);await doMove(turnFace+(prime?"'":''));}else notify('Middle layer · ignored');}
+ if(dragKind==='orbit'){controls.enabled=true}down=null;dragKind=null;dragSticker=null;});
+renderer.domElement.addEventListener('pointercancel',()=>{down=null;dragKind=null;dragSticker=null;controls.enabled=true});
+renderer.domElement.addEventListener('pointermove',e=>{if(down&&dragKind==='sticker'&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>7){renderer.domElement.style.cursor='grabbing'}else renderer.domElement.style.cursor='grab'});
+renderer.domElement.addEventListener('pointerdown',()=>renderer.domElement.style.cursor='grabbing');renderer.domElement.addEventListener('pointerup',()=>renderer.domElement.style.cursor='grab');
+function resize(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)}addEventListener('resize',resize);
+function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera)}animate();
+setStatus();
+</script>
+</body></html>
