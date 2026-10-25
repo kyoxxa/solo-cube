@@ -90,7 +90,7 @@ h1,h2,h3,p{margin-top:0}
 @media(max-width:980px){.workspace{grid-template-columns:minmax(0,1fr);}.camera-inner{padding-bottom:18px}.camera-frame{max-height:56vh}#cubeStage{height:360px}.digital-panel{min-height:600px}.topbar{height:66px}}
 @media(max-width:560px){.topbar{padding:0 12px}.brand{font-size:10px;letter-spacing:.08em}.top-right .pill:first-child{display:none}main{padding:10px}.panel-head{padding:16px 15px 12px}.camera-inner{padding:0 10px 12px}.camera-actions button{font-size:11px;padding:10px 9px}.workspace{gap:10px}.panel{border-radius:15px}#cubeStage{height:300px;min-height:250px}.instruction-card{margin:0 10px 12px;padding:13px}.step-arrow{width:48px;height:48px;flex-basis:48px;font-size:28px}.step-title{font-size:14px}.step-text{font-size:12px}}
 </style>
-<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js","three/":"https://cdn.jsdelivr.net/npm/three@0.165.0/"}}</script>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/","three/":"https://cdn.jsdelivr.net/npm/three@0.165.0/"}}</script>
 </head>
 <body>
 <header class="topbar">
@@ -155,6 +155,101 @@ h1,h2,h3,p{margin-top:0}
  <div class="footer-note">Camera frames are processed locally in your browser. Color detection is calibrated from the six face centers; review and correct uncertain stickers before trusting the scan.</div>
 </main>
 <div id="toast" class="toast"></div>
+
+
+<script>
+/* Camera safety net: this plain script still runs if the 3D ES module fails to import. */
+(() => {
+  window.__cameraLabModuleReady = false;
+  window.__cameraFallbackRunning = false;
+  const $ = selector => document.querySelector(selector);
+  const button = $('#startCamera');
+  const video = $('#cameraVideo');
+  const status = $('#cameraStatus');
+  const errorBox = $('#cameraError');
+  const pillText = $('#cameraPillText');
+  const cameraDot = $('#cameraDot');
+  const liveText = $('#liveText');
+  const liveDot = $('#liveDot');
+  const videoLabel = $('#videoLabel');
+  const videoDot = $('#videoDot');
+  const capture = $('#captureNow');
+  const resetGrid = $('#resetGrid');
+  let stream = null;
+
+  function showError(message) {
+    errorBox.style.display = 'block';
+    errorBox.textContent = message;
+  }
+  function setLive(live) {
+    pillText.textContent = live ? 'Camera live · fallback' : 'Camera idle';
+    cameraDot.className = 'dot' + (live ? ' live' : '');
+    liveText.textContent = live ? 'Live · fallback' : 'Offline';
+    liveDot.className = 'dot' + (live ? ' live' : '');
+    videoLabel.textContent = live ? 'CAMERA LIVE · 3D SCRIPT FAILED' : 'WAITING FOR CAMERA';
+    videoDot.className = 'dot' + (live ? ' live' : '');
+  }
+
+  // Default guide shown even if the module failed before drawing its perspective grid.
+  const polygon = $('#gridPolygon');
+  const lines = $('#gridLines');
+  if (polygon && !polygon.getAttribute('points')) {
+    polygon.setAttribute('points', '140,85 860,85 860,665 140,665');
+    const ns = 'http://www.w3.org/2000/svg';
+    [[380,85,380,665],[620,85,620,665],[140,278,860,278],[140,472,860,472]].forEach(([x1,y1,x2,y2]) => {
+      const line = document.createElementNS(ns,'line');
+      line.setAttribute('x1',x1);line.setAttribute('y1',y1);
+      line.setAttribute('x2',x2);line.setAttribute('y2',y2);
+      line.setAttribute('class','gridline');lines.appendChild(line);
+    });
+  }
+
+  button?.addEventListener('click', async () => {
+    if (window.__cameraLabModuleReady) return; // Normal module handler owns the working app.
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;video.srcObject = null;window.__cameraFallbackRunning = false;
+      button.textContent = 'Start camera';button.disabled = false;
+      capture.disabled = true;resetGrid.disabled = true;setLive(false);
+      status.textContent = 'Camera stopped. Reload the page after the module import is fixed.';
+      return;
+    }
+    errorBox.style.display = 'none';errorBox.textContent = '';
+    button.disabled = true;button.textContent = 'Opening camera…';
+    status.textContent = 'Requesting camera permission from your browser…';
+    try {
+      if (!window.isSecureContext) throw new Error('Open the published HTTPS website, not a file:// or http:// address.');
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser does not expose webcam access. Try a current version of Chrome or Edge.');
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio:false,
+        video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}
+      });
+      video.srcObject = stream;
+      await video.play();
+      window.__cameraFallbackRunning = true;
+      setLive(true);
+      button.disabled = false;button.textContent = 'Stop camera';
+      capture.disabled = false;resetGrid.disabled = false;
+      status.textContent = 'The webcam is working, but the 3D module did not initialize. This fallback proves camera access works; reload after the import fix to enable automatic capture and the digital twin.';
+    } catch (e) {
+      const messages = {
+        NotAllowedError:'Permission was denied or blocked. Click the site icon beside the address bar → Site settings → Camera → Allow, then reload.',
+        NotFoundError:'No webcam was found. Connect or enable a camera, or choose a different device.',
+        NotReadableError:'The webcam is already being used by another app or browser tab. Close it there and retry.',
+        OverconstrainedError:'The selected camera mode is not supported. Try another camera.'
+      };
+      showError('Camera could not start ('+(e.name||'Error')+'): '+(messages[e.name]||e.message||String(e)));
+      status.textContent = 'Camera unavailable. Use the message above to identify the reason.';
+      button.disabled = false;button.textContent = 'Try camera again';
+      stream = null;
+    }
+  });
+
+  window.addEventListener('pagehide', () => {
+    if (stream) stream.getTracks().forEach(track => track.stop());
+  });
+})();
+</script>
 
 <script type="module">
 import * as THREE from 'three';
@@ -779,6 +874,7 @@ renderAnimation();
 // Initial visual state
 resetGuide();updateStepPanel();renderFaceChips();
 $('#nextStep').disabled=true;$('#captureNow').disabled=true;
+window.__cameraLabModuleReady=true;
 </script>
 </body>
 </html>
