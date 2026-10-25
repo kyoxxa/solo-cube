@@ -179,6 +179,8 @@ window.addEventListener('load',()=>setTimeout(()=>{
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CameraController } from './js/camera.js';
+import { FACES as ENGINE_FACES, idx as cubeIdx, applyMove as applyCubeMove } from './js/cubeEngine.js';
+import { inferVisibleFaceMove, StableObservationGate, faceMapToState } from './js/liveMirror.js';
 
 const $ = s => document.querySelector(s);
 const faceOrder = ['F','R','B','L','U','D'];
@@ -203,7 +205,8 @@ let scanIndex=0, scanStream=null, scanTimer=null, lastSignature=null, stableSinc
 let scanPaused=true, capturedFaces={}, previewFace=null, pendingSamples=null, pendingWarning='';
 let videoAspect=4/3, viewHeight=750, guidePoints=[], dragCorner=-1, captureBusy=false, finalValidation=null;
 let digitalHistory=[], virtualBusy=false;
-let rejectedCenterRGB=null; // was used by monitorCamera() but never declared -> crashed auto-capture every tick
+let rejectedCenterRGB=null; // Used by center-color safety check.
+let mirrorActive=false, mirrorState=null, mirrorGate=null, mirrorBaseline=null;
 
 // ---------- Responsive perspective grid ----------
 const svgNS='http://www.w3.org/2000/svg';
@@ -368,7 +371,7 @@ function resizeCube(){
 new ResizeObserver(resizeCube).observe(stage);resizeCube();
 function invertMove(m){if(m.endsWith('2'))return m;if(m.endsWith("'"))return m[0];return m+"'";}
 function rotateDigitalMove(m,record=true,duration=170){
- if(scanStream){toast('Digital turns are paused during a physical scan so the digital twin stays aligned. Stop the camera to play with moves.');return Promise.resolve(false);}
+ if(scanStream&&!mirrorActive){toast('Digital turns are paused during the scan. Validate all six faces to start live mirroring.');return Promise.resolve(false);}
  if(virtualBusy)return Promise.resolve(false);
  const def=moveDefs[m[0]];if(!def)return Promise.resolve(false);
  const turns=m.endsWith('2')?2:1,prime=m.endsWith("'"),angle=def.sign*Math.PI/2*(prime?-1:1)*turns;
@@ -497,6 +500,7 @@ function currentImage(){
 function signatureFor(samples){return samples.map(s=>s.rgb).flat();}
 function signatureDiff(a,b){if(!a||!b||a.length!==b.length)return Infinity;let sum=0;for(let i=0;i<a.length;i++)sum+=Math.abs(a[i]-b[i]);return sum/a.length;}
 function monitorCamera(){
+ if(mirrorActive){monitorLiveMirror();return;}
  if(scanPaused||!scanStream||captureBusy||!video.videoWidth)return;
  const image=currentImage();if(!image)return;
  const samples=extractFaceSamples(image),sig=signatureFor(samples);
@@ -527,6 +531,103 @@ function monitorCamera(){
    }
  }
 }
+// ---------- Live physical-to-digital mirroring ----------
+// The camera grid reads one visible face. We compare its nine calibrated
+// sticker identities with the known cube state and animate only a unique,
+// stable single-turn match. Ambiguous/unseen turns never mutate the model.
+function createMirrorState(){
+ const faceMap={};
+ for(const face of ENGINE_FACES){
+  const samples=capturedFaces[face];
+  if(!samples||samples.length!==9)throw new Error(`Missing scanned face ${face}`);
+  faceMap[face]=samples.map((sample,i)=>{
+   const color=sample.forcedFace||sample.centerMatch;
+   if(!ENGINE_FACES.includes(color))throw new Error(`Sticker ${face}:${i+1} has no calibrated color`);
+   return color;
+  });
+ }
+ return faceMapToState(faceMap);
+}
+function nearestCenterFace(rgb){
+ const ranked=ENGINE_FACES.map(face=>({face,d:deltaE(rgb,capturedFaces[face][4].rgb)})).sort((a,b)=>a.d-b.d);
+ if(!ranked.length||ranked[0].d>54)return null;
+ // If neighboring colors are too close under current lighting, do not guess.
+ if(ranked[1]&&ranked[1].d-ranked[0].d<2.5)return null;
+ return ranked[0].face;
+}
+function moveInstruction(move){
+ const side={U:'top',D:'bottom',R:'right',L:'left',F:'front',B:'back'}[move[0]]||'cube';
+ if(move.endsWith('2'))return `turn the ${side} side halfway around`;
+ return `turn the ${side} side ${move.endsWith("'")?'counterclockwise':'clockwise'}`;
+}
+function monitorLiveMirror(){
+ if(!scanStream||!video.videoWidth||virtualBusy||!mirrorState)return;
+ const image=currentImage();if(!image)return;
+ const samples=extractFaceSamples(image);
+ const observed=samples.map(sample=>nearestCenterFace(sample.rgb));
+ if(observed.some(x=>!x)){
+  $('#videoLabel').textContent='COLOR UNCLEAR';$('#videoDot').className='dot warn';
+  setCameraStatus('Live mirror paused: a sticker color is hard to read. Improve the light and keep one full face inside the grid.');
+  mirrorGate?.reset();return;
+ }
+ const visibleFace=observed[4];
+ if(observed.filter(x=>x===visibleFace).length<1){
+  $('#videoLabel').textContent='FIND A FACE';return;
+ }
+ const stable=mirrorGate?.push(visibleFace,observed);
+ $('#videoLabel').textContent='TRACKING '+visibleFace;
+ $('#videoDot').className='dot live';
+ if(!stable)return;
+ if(mirrorBaseline===null){
+  mirrorBaseline=stable.signature;
+  setCameraStatus(`Live mirror is ready on ${faceMeta[visibleFace].name}. Keep that face centered and make one face turn at a time. The digital cube will follow a clearly detected turn.`);
+  return;
+ }
+ if(stable.signature===mirrorBaseline)return;
+ const result=inferVisibleFaceMove(mirrorState,visibleFace,observed,{maxErrors:1});
+ if(result.status==='unchanged'){
+  // No visible change (often the hidden opposite layer). Keep model state;
+  // this is intentionally not treated as a physical turn.
+  mirrorBaseline=stable.signature;
+  setCameraStatus('I can only mirror a turn that changes the face in view. Center the face you are turning; hidden turns are not guessed.');
+  return;
+ }
+ if(result.status==='ambiguous'){
+  mirrorBaseline=stable.signature;
+  $('#videoLabel').textContent='TURN UNCLEAR';$('#videoDot').className='dot warn';
+  setCameraStatus('I saw a change, but this face alone does not identify one turn. Hold a face square to the grid and try one turn at a time; the digital cube has not been changed.');
+  return;
+ }
+ if(result.status!=='detected'){
+  mirrorBaseline=stable.signature;
+  $('#videoLabel').textContent='RE-CENTER CUBE';$('#videoDot').className='dot warn';
+  setCameraStatus('That view does not match one clear face turn. Re-center the cube in the grid. If the scan was off, reset and scan again.');
+  return;
+ }
+ const move=result.move;
+ // State updates only after the 3D move animation has completed successfully.
+ setCameraStatus(`Turn detected: ${move} — ${moveInstruction(move)}. Mirroring it on the digital cube…`);
+ rotateDigitalMove(move,false,260).then(ok=>{
+  if(!ok||!mirrorActive)return;
+  mirrorState=applyCubeMove(mirrorState,move);
+  mirrorBaseline=stable.signature;
+  setCameraStatus(`Mirrored ${move}. Keep the cube steady, then make the next single turn.`);
+ });
+}
+function startLiveMirror(){
+ if(!finalValidation?.valid){toast('Validate all six face colors before starting live mirroring.');return;}
+ if(!scanStream){toast('Turn on the camera first, then start live mirroring.');return;}
+ try{mirrorState=createMirrorState();}catch(e){toast('The scan is missing a clear face. Correct it and validate again.');return;}
+ mirrorGate=new StableObservationGate(4);mirrorBaseline=null;mirrorActive=true;scanPaused=false;lastSignature=null;stableSince=0;
+ setCameraStatus('Starting live mirror. Center one cube face in the grid and hold still for a moment.');
+ const button=$('#startMirror');if(button){button.textContent='Stop live mirror';button.classList.remove('primary');button.classList.add('subtle');}
+}
+function stopLiveMirror(){
+ mirrorActive=false;mirrorState=null;mirrorGate?.reset();mirrorGate=null;mirrorBaseline=null;scanPaused=true;
+ const button=$('#startMirror');if(button){button.textContent='Start live mirror';button.classList.add('primary');button.classList.remove('subtle');}
+ setCameraStatus('Live mirroring stopped. Your scanned colors are still here.');
+}
+
 function centerAlreadySeen(sample,excludeFace=null){
  const currentLabel=sample.label;
  for(const [f,samples] of Object.entries(capturedFaces)){
@@ -687,7 +788,7 @@ acceptAnywayBtn.addEventListener('click',()=>{
 retakeBtn.addEventListener('click',()=>{
  const f=faceOrder[scanIndex];
  if(!capturedFaces[f]){scanPaused=false;lastSignature=null;stableSince=0;setCameraStatus('Place the '+faceMeta[f].name.toLowerCase()+' inside the grid and hold still.');return;}
- delete capturedFaces[f];resetDigitalFace(f);previewFace=f;renderPreview(f);renderFaceChips();$('#scanPill').textContent=Object.keys(capturedFaces).length+' / 6 faces';
+ mirrorActive=false;mirrorState=null;mirrorGate?.reset();mirrorBaseline=null;delete capturedFaces[f];resetDigitalFace(f);previewFace=f;renderPreview(f);renderFaceChips();$('#scanPill').textContent=Object.keys(capturedFaces).length+' / 6 faces';
  $('#twinPill').textContent=Object.keys(capturedFaces).length+' captured';finalValidation=null;
  captureBusy=false;scanPaused=false;lastSignature=null;stableSince=0;nextStepBtn.disabled=true;nextStepBtn.textContent='Waiting for a steady face…';
  setCameraStatus('Retaking '+faceMeta[f].name+'. Fit the corners and hold still.');toast('Retake this face.');
@@ -729,7 +830,8 @@ function validateScan(){
  <div class="count-grid">${faceOrder.map(f=>`<div class="count-item"><span>${faceMeta[f].name}</span><strong>${finalValidation.counts[f]??'—'}/9</strong></div>`).join('')}</div>
  ${finalValidation.errors.length?'<ul>'+finalValidation.errors.map(e=>`<li>${e}</li>`).join('')+'</ul>':''}
  <p>Color groups use the six captured center stickers as calibration references, allowing for different sticker hues. If two colors are very similar or lighting changes between views, review the square labels manually.</p>
- <button id="exportScan" class="primary">Export scan JSON</button> <button id="hideValidation" class="subtle small">Hide results</button>`;
+ ${finalValidation.valid?'<p>For live mirroring, keep one full face square in the camera grid. Turn one face at a time and pause for the 3D cube to follow. Hidden or ambiguous turns are not guessed.</p><button id="startMirror" class="primary">Start live mirror</button>':''} <button id="exportScan" class="subtle small">Export scan JSON</button> <button id="hideValidation" class="subtle small">Hide results</button>`;
+ if(finalValidation.valid)$('#startMirror').addEventListener('click',()=>mirrorActive?stopLiveMirror():startLiveMirror());
  $('#exportScan').addEventListener('click',()=>{
   const report={application:'RubiksCube for Idiots',capturedAt:new Date().toISOString(),calibration:'Per-cube center color Lab-distance clustering',validation:{valid:finalValidation.valid,errors:finalValidation.errors,counts:finalValidation.counts},faces:capturedFaces};
   const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='rubikscube-scan.json';a.click();URL.revokeObjectURL(url);
@@ -744,7 +846,7 @@ function validateScan(){
  setCameraStatus(finalValidation.valid?'Scan consistency checks passed. You can export the face/color map.':'Scan has issues to review. See the validation panel.');
 }
 $('#resetScan').addEventListener('click',()=>{
- capturedFaces={};scanIndex=0;previewFace=null;pendingSamples=null;pendingWarning='';captureBusy=false;scanPaused=!scanStream;lastSignature=null;stableSince=0;finalValidation=null;
+ mirrorActive=false;mirrorState=null;mirrorGate?.reset();mirrorBaseline=null;capturedFaces={};scanIndex=0;previewFace=null;pendingSamples=null;pendingWarning='';captureBusy=false;scanPaused=!scanStream;lastSignature=null;stableSince=0;finalValidation=null;
  faceOrder.forEach(resetDigitalFace);$('#validationPanel').style.display='none';$('#scanPill').textContent='0 / 6 faces';$('#twinPill').textContent='Waiting for scan';$('#previewFaceLabel').textContent='No face captured';
  renderPreview(null);renderFaceChips();updateStepPanel();nextStepBtn.disabled=true;nextStepBtn.textContent='Next step →';retakeBtn.disabled=true;acceptAnywayBtn.hidden=true;hideAlert();
  setCameraStatus(scanStream?'Scan reset. Fit the first face inside the grid and hold steady.':'Scan reset. Start the camera to begin.');
@@ -789,6 +891,7 @@ async function updateSwitchButton(){
 }
 function renderCameraState({state,error}){
  scanStream=camera.stream;
+ if(state==='idle'||state==='error'){mirrorActive=false;mirrorGate?.reset();mirrorBaseline=null;}
  if(state!=='live'&&scanTimer){clearInterval(scanTimer);scanTimer=null;}
  setIndicators(state);
  const busy=state==='starting',live=state==='live';
@@ -803,8 +906,8 @@ function renderCameraState({state,error}){
  if(live){
   fitCameraFrame();
   // Don't auto-capture over a face that's already captured (e.g. after returning to the tab).
-  scanPaused=!!capturedFaces[faceOrder[scanIndex]];lastSignature=null;stableSince=0;
-  setCameraStatus('Live. Hold the cube flat, fill each square of the grid, avoid shadows. It captures by itself when the view is steady, or tap Capture face now.');
+  scanPaused=mirrorActive?false:!!capturedFaces[faceOrder[scanIndex]];lastSignature=null;stableSince=0;
+  setCameraStatus(mirrorActive?'Camera live. Keep one face centered; the digital cube will mirror clearly detected single turns.':'Live. Hold the cube flat, fill each square of the grid, avoid shadows. It captures by itself when the view is steady, or tap Capture face now.');
   scanTimer=setInterval(monitorCamera,170);
   updateSwitchButton();
   return;
