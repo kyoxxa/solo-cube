@@ -34,23 +34,45 @@ button.primary{background:#f1f1ed;color:#17181a;border-color:#f1f1ed}button.prim
 #scanPreview span{transition:background .2s}
 @media(max-width:650px){.scan-layout{grid-template-columns:1fr}.scan-dialog{max-height:94vh}.scan-note{font-size:12px}#cameraScan{top:62px}}
 @media(max-width:600px){.bottom{align-items:flex-end}.hint{max-width:47%;font-size:10px}.controls{gap:6px}.controls button{padding:10px 11px;font-size:11px}.brand{font-size:11px}.status{font-size:9px}.moves{top:auto;bottom:80px;transform:translateX(-50%)}.move-toggle{top:62px}}
+
+.scan-backdrop{position:fixed;inset:0;z-index:20;background:radial-gradient(ellipse at 15% 15%,#18202b 0%,#090a0df7 55%);display:none;place-items:stretch;padding:clamp(8px,1.5vw,20px);pointer-events:auto;backdrop-filter:blur(18px)}
+.scan-backdrop.open{display:grid}
+.scan-dialog{width:100%;height:100%;max-height:none;overflow:auto;background:linear-gradient(145deg,#17191f,#111216);border:1px solid #ffffff20;border-radius:22px;padding:clamp(14px,2vw,28px);box-shadow:0 25px 100px #000a;display:flex;flex-direction:column}
+.scan-head{flex-shrink:0}.scan-head h2{font-size:clamp(20px,2vw,30px);letter-spacing:-.035em}.scan-step{margin-top:6px;font-size:13px}
+.scan-layout{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(320px,.88fr);gap:clamp(18px,2.5vw,36px);flex:1;min-height:0;align-items:stretch}
+.scan-layout>div:first-child,.scan-layout>div:last-child{min-width:0;display:flex;flex-direction:column}
+.camera-frame{flex:1;min-height:280px;aspect-ratio:auto;border-radius:18px;background:#050608;border:1px solid #ffffff30;box-shadow:inset 0 0 0 1px #000;overflow:hidden}
+.camera-frame video{object-fit:contain;background:#050608;transform:scaleX(-1)}
+.camera-grid{inset:10%;border:2px solid #d9f99d;box-shadow:0 0 0 999px #05060835,0 0 30px #a3e63530;border-radius:4px}
+.camera-grid span{border:1px solid #d9f99d99}
+.scan-note{font-size:clamp(13px,1.05vw,15px);line-height:1.65;color:#c7cad2}
+.scan-buttons button{border-radius:12px;padding:13px 16px}
+.scan-preview{gap:7px;margin:14px 0}
+.scan-preview span{aspect-ratio:1;border-radius:10px;border:2px solid #ffffff25;display:grid;place-items:end center;padding:5px;color:#fff;font-size:10px;font-weight:850;text-shadow:0 1px 4px #000,0 1px 5px #000;box-shadow:inset 0 0 0 1px #0002;transition:background .2s,transform .2s}
+.scan-faces span{padding:7px 10px;border-radius:9px}
+#turnArrow{font-size:clamp(36px,5vw,58px);margin:0 auto 4px;animation:none;text-shadow:0 0 28px #a3e63535}
+#holdCountdown{background:#22262c;border:1px solid #ffffff12;border-radius:12px;padding:12px;margin:8px 0 14px}
+#scanMessage{padding:12px 14px;background:#ffffff07;border:1px solid #ffffff12;border-radius:12px;margin-top:12px}
+@media(max-width:760px){.scan-backdrop{padding:8px}.scan-dialog{border-radius:16px}.scan-layout{grid-template-columns:1fr;gap:14px}.camera-frame{flex:0 0 auto;min-height:0;aspect-ratio:4/3}.scan-dialog{overflow:auto}.scan-layout>div:last-child{padding-bottom:12px}}
+@media(min-width:761px){.scan-dialog{overflow:hidden}.scan-layout>div:last-child{overflow:auto;padding-right:4px}}
+
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js"}}</script>
 </head>
 <body><main id="app">
 <div class="hud">
  <header class="top"><div class="brand"><span class="mark"><i></i><i></i><i></i><i></i></span> RUBIKSCUBE FOR IDIOTS</div><div class="status" id="status">SOLVED STATE</div></header>
- <footer class="bottom"><div class="hint"><strong>DRAG</strong> a face to turn · <strong>DRAG OUTSIDE</strong> to orbit<br><strong>SCROLL</strong> to zoom · <strong>U D L R F B</strong> to move · <strong>SHIFT</strong> to reverse</div><div class="controls"><button id="cameraScan">📷 Guided camera scan</button><button id="voiceToggle">🎙 Voice help</button><button id="movesToggle">Moves</button><button id="scramble">Scramble ↗</button><button id="solve" class="primary">Solve cube</button></div></footer>
+ <footer class="bottom"><div class="hint"><strong>DRAG</strong> a face to turn · <strong>DRAG OUTSIDE</strong> to orbit<br><strong>SCROLL</strong> to zoom · <strong>U D L R F B</strong> to move · <strong>SHIFT</strong> to reverse</div><div class="controls"><button id="cameraScan">📷 Guided camera scan</button><button id="movesToggle">Moves</button><button id="scramble">Scramble ↗</button><button id="solve" class="primary">Solve cube</button></div></footer>
 </div>
 <button class="move-toggle" id="closeMoves" hidden>Close ×</button>
 <section class="moves" id="movePanel" aria-label="Cube move controls"></section>
 <div class="toast" id="toast"></div>
 <section class="scan-backdrop" id="scanBackdrop" role="dialog" aria-modal="true" aria-labelledby="scanTitle">
  <div class="scan-dialog"><div class="scan-head"><div><h2 id="scanTitle">Guided cube scan</h2><div class="scan-step" id="scanStep">Step 1 of 6 · Hold steady</div></div><button id="scanClose">Close ×</button></div>
- <p class="scan-note">Allow camera access, then follow the spoken prompts and arrows. Keep the whole 3×3 face inside the guide and hold still for two seconds; the camera will capture it automatically. You will be guided to turn the cube to reveal the faces the camera cannot see. Bright, even light works best. Camera images stay in your browser.</p>
- <div class="scan-layout"><div><div class="camera-frame"><video id="scanVideo" autoplay playsinline muted></video><div class="camera-grid" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div><div class="scan-buttons"><button id="cameraStart" class="primary">Start guided scan</button><button id="voiceListen">🎙 Start voice commands</button></div></div>
+ <p class="scan-note">Allow camera access, then Align one full face inside the 3×3 guide. Keep the cube steady for two seconds while the scanner samples each sticker, then follow the on-screen rotation instructions. Bright, even lighting and a straight-on view improve recognition. Images are processed locally in your browser.</p>
+ <div class="scan-layout"><div><div class="camera-frame"><video id="scanVideo" autoplay playsinline muted></video><div class="camera-grid" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div><div class="scan-buttons"><button id="cameraStart" class="primary">Start guided scan</button></div></div>
  <div><div id="turnArrow" aria-hidden="true">⬆️</div><div id="holdCountdown">Camera not started</div><div class="scan-note" id="faceGuide"><strong>U face:</strong> Hold the Up face toward the camera, with the back edge at the top and front edge at the bottom.</div><div class="scan-preview" id="scanPreview"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div><div class="scan-faces" id="scanFaces"><span data-face="U">U</span><span data-face="R">R</span><span data-face="F">F</span><span data-face="D">D</span><span data-face="L">L</span><span data-face="B">B</span></div>
- <div class="scan-buttons"><button id="repeatPrompt">🔊 Repeat instructions</button><button id="nextFace" class="primary">Continue</button></div><div class="scan-note" id="scanMessage" aria-live="polite">Start the camera to begin. Say “help”, “repeat”, or “next” after enabling voice commands.</div><div id="scanSolution" hidden></div></div></div></div></section>
+ <div class="scan-buttons"><button id="nextFace" class="primary">Continue</button></div><div class="scan-note" id="scanMessage" aria-live="polite">Start the camera, center one full face in the guide, and follow the visual instructions. No images are uploaded.</div><div id="scanSolution" hidden></div></div></div></div></section>
 </main>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js';
@@ -122,7 +144,7 @@ setStatus();
 // Guided webcam scan + speech assistance. Image processing remains in-browser.
 const scanBackdrop=document.querySelector('#scanBackdrop'),scanVideo=document.querySelector('#scanVideo');
 const faceOrder=['F','R','B','L','U','D'];
-let scanIndex=0,scanStream=null,capturedFaces={},currentSamples=null,autoTimer=null,voiceRecognition=null,voiceOn=false,scanRunning=false;
+let scanIndex=0,scanStream=null,capturedFaces={},currentSamples=null,autoTimer=null,scanRunning=false;
 const prompts=[
  {face:'F',title:'Front face',arrow:'⬆️',direction:'Hold the cube with one face pointing straight at the camera.',why:'We need to identify the nine stickers on this visible face before we can reason about the hidden sides.'},
  {face:'R',title:'Right face',arrow:'↻️',direction:'Turn the whole cube to your left, like opening a book, until the cube’s right side faces the camera.',why:'This reveals a new side while keeping track of how the faces meet at their edges.'},
@@ -132,7 +154,6 @@ const prompts=[
  {face:'D',title:'Bottom face',arrow:'⬇️',direction:'Carefully tilt the cube the other way so the bottom face points toward the camera.',why:'The bottom face is normally hidden, and a complete scan needs all six sides.'}
 ];
 function scanMessage(t){document.querySelector('#scanMessage').textContent=t}
-function speak(t){if(!('speechSynthesis' in window))return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.rate=.94;u.pitch=1;window.speechSynthesis.speak(u)}
 function updateScanUI() {
   const step = prompts[scanIndex];
 
@@ -173,8 +194,6 @@ const scanMessageEl = document.querySelector('#scanMessage');
 const countdownEl = document.querySelector('#holdCountdown');
 const arrowEl = document.querySelector('#turnArrow');
 const nextFaceBtn = document.querySelector('#nextFace');
-const repeatPromptBtn = document.querySelector('#repeatPrompt');
-const voiceListenBtn = document.querySelector('#voiceListen');
 let holdTimer = null;
 let scanCanvas = document.createElement('canvas');
 let scanCtx = scanCanvas.getContext('2d', {willReadFrequently:true});
@@ -206,7 +225,8 @@ function stopCamera() {
 function openScanner() {
   scanBackdrop.classList.add('open');
   updateScanUI();
-  setScanMessage('Click “Start guided scan” to request camera permission.');
+  setScanMessage('Opening camera… Allow access if your browser asks. Center one complete cube face inside the green 3×3 guide.');
+  if (!scanRunning) cameraStartBtn?.click();
 }
 document.querySelector('#cameraScan')?.addEventListener('click', openScanner);
 
@@ -245,34 +265,51 @@ cameraStartBtn?.addEventListener('click', async () => {
   }
 });
 
-function sampleCurrentFace() {
-  if (!scanVideo || !scanVideo.videoWidth || !scanVideo.videoHeight) {
-    setScanMessage('The camera has not produced a video frame yet. Keep the camera open and try again.');
-    return false;
-  }
-  const w = scanVideo.videoWidth, h = scanVideo.videoHeight;
-  scanCanvas.width = w; scanCanvas.height = h;
-  scanCtx.drawImage(scanVideo, 0, 0, w, h);
-  // Sample the center of each cell in the on-screen 3x3 guide (inner 80% of frame).
-  const samples = [];
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < 3; col++) {
-      const x = Math.round(w * (0.1 + (col + 0.5) * 0.8 / 3));
-      const y = Math.round(h * (0.1 + (row + 0.5) * 0.8 / 3));
-      const d = scanCtx.getImageData(x, y, 1, 1).data;
-      const css = `rgb(${d[0]}, ${d[1]}, ${d[2]})`;
-      samples.push({css, rgb:[d[0], d[1], d[2]]});
+function rgbToHsv(r,g,b){
+  r/=255;g/=255;b/=255;
+  const max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min;
+  let hue=0;
+  if(d!==0){if(max===r)hue=((g-b)/d)%6;else if(max===g)hue=(b-r)/d+2;else hue=(r-g)/d+4;hue*=60;if(hue<0)hue+=360;}
+  return {h:hue,s:max===0?0:d/max,v:max};
+}
+function classifyStickerColor(rgb){
+  const {h,s,v}=rgbToHsv(rgb[0],rgb[1],rgb[2]);
+  if(v<0.16)return {label:'Too dark',color:'#282a30',confidence:'low'};
+  if(s<0.20&&v>0.48)return {label:'White',color:'#f4f3ed',confidence:v>0.68?'high':'medium'};
+  if(h<14||h>=346)return {label:'Red',color:'#e53935',confidence:s>.38?'high':'medium'};
+  if(h<39)return {label:'Orange',color:'#ff812b',confidence:s>.38?'high':'medium'};
+  if(h<68)return {label:'Yellow',color:'#f5d52e',confidence:s>.34?'high':'medium'};
+  if(h<165)return {label:'Green',color:'#32c85a',confidence:s>.30?'high':'medium'};
+  if(h<258)return {label:'Blue',color:'#3188e8',confidence:s>.30?'high':'medium'};
+  if(h<290)return {label:'Purple?',color:'#9b6ce0',confidence:'low'};
+  return {label:'Red?',color:'#e53935',confidence:'low'};
+}
+function median(values){values.sort((a,b)=>a-b);return values[Math.floor(values.length/2)]}
+function sampleCurrentFace(){
+  if(!scanVideo||!scanVideo.videoWidth||!scanVideo.videoHeight){setScanMessage('No video frame is available yet. Keep the camera running and try again.');return false;}
+  const w=scanVideo.videoWidth,h=scanVideo.videoHeight;
+  scanCanvas.width=w;scanCanvas.height=h;scanCtx.drawImage(scanVideo,0,0,w,h);
+  const samples=[];
+  for(let row=0;row<3;row++)for(let col=0;col<3;col++){
+    const cx=w*(.10+(col+.5)*.80/3),cy=h*(.10+(row+.5)*.80/3);
+    const halfW=w*.80/3*.19,halfH=h*.80/3*.19,rs=[],gs=[],bs=[];
+    for(let sy=-2;sy<=2;sy++)for(let sx=-2;sx<=2;sx++){
+      const x=Math.max(0,Math.min(w-1,Math.round(cx+sx*halfW/2)));
+      const y=Math.max(0,Math.min(h-1,Math.round(cy+sy*halfH/2)));
+      const d=scanCtx.getImageData(x,y,1,1).data;rs.push(d[0]);gs.push(d[1]);bs.push(d[2]);
     }
+    const rgb=[median(rs),median(gs),median(bs)],detected=classifyStickerColor(rgb);
+    samples.push({rgb,css:detected.color,label:detected.label,confidence:detected.confidence,rawCss:`rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`});
   }
-  currentSamples = samples;
-  capturedFaces[prompts[scanIndex].face] = samples;
-  capturedCount = Object.keys(capturedFaces).length;
-  document.querySelectorAll('#scanPreview span').forEach((el, i) => {
-    el.style.background = samples[i].css;
+  currentSamples=samples;capturedFaces[prompts[scanIndex].face]=samples;capturedCount=Object.keys(capturedFaces).length;
+  document.querySelectorAll('#scanPreview span').forEach((el,i)=>{
+    el.style.background=samples[i].css;el.textContent=samples[i].label;
+    el.title=samples[i].label+' · '+samples[i].confidence+' confidence · '+samples[i].rawCss;
+    el.style.color=['Yellow','White','Too dark'].includes(samples[i].label)?'#18191b':'#fff';
   });
-  document.querySelectorAll('#scanFaces span').forEach(el => {
-    el.classList.toggle('done', !!capturedFaces[el.dataset.face]);
-  });
+  document.querySelectorAll('#scanFaces span').forEach(el=>el.classList.toggle('done',!!capturedFaces[el.dataset.face]));
+  const low=samples.filter(s=>s.confidence==='low').length;
+  setScanMessage(low?'View sampled, but '+low+' sticker(s) look uncertain. Improve lighting and align the cube more squarely before continuing.':'View sampled. Review all nine detected color labels; adjust lighting or angle and recapture if any label looks wrong.');
   return true;
 }
 function beginTimedCapture() {
@@ -291,15 +328,14 @@ function beginTimedCapture() {
     if (sampleCurrentFace()) {
       if (countdownEl) countdownEl.textContent = 'Captured ' + prompts[scanIndex].title + ' ✓';
       setScanMessage('Captured this view. Check the nine sampled squares, then click Continue when you are ready to show the next side.');
-      speak('View captured. ' + prompts[scanIndex].title + ' recorded.');
+
     }
   };
   holdTimer = setTimeout(tick, 1000);
 }
-function announceCurrentPrompt() {
-  const step = prompts[scanIndex];
-  if (arrowEl) arrowEl.textContent = step.arrow;
-  speak(step.title + '. ' + step.direction + ' Why: ' + step.why);
+function announceCurrentPrompt(){
+  const step=prompts[scanIndex];
+  if(arrowEl)arrowEl.textContent=step.arrow;
 }
 nextFaceBtn?.addEventListener('click', () => {
   if (!scanRunning) {
@@ -321,10 +357,8 @@ nextFaceBtn?.addEventListener('click', () => {
     stopHoldTimer();
     setScanMessage('All six views have been sampled. This prototype displays sampled colors; it does not yet reliably reconstruct or solve a physical cube.');
     if (countdownEl) countdownEl.textContent = 'Scan complete: ' + capturedCount + '/6 views';
-    speak('Scan complete. The captured colors are ready for review. A full cube reconstruction and solving engine is still needed.');
   }
 });
-repeatPromptBtn?.addEventListener('click', announceCurrentPrompt);
 scanCloseBtn?.addEventListener('click', () => {
   stopCamera();
   scanBackdrop.classList.remove('open');
@@ -334,47 +368,6 @@ scanBackdrop?.addEventListener('click', event => {
     stopCamera();
     scanBackdrop.classList.remove('open');
   }
-});
-
-// Speech recognition is optional; speech synthesis remains available for spoken prompts.
-voiceListenBtn?.addEventListener('click', () => {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    setScanMessage('Voice commands are not supported in this browser. Try Chrome or Edge; you can still use the buttons.');
-    return;
-  }
-  if (voiceRecognition && voiceOn) {
-    voiceRecognition.stop();
-    voiceOn = false;
-    voiceListenBtn.textContent = '🎙 Start voice commands';
-    setScanMessage('Voice commands stopped.');
-    return;
-  }
-  voiceRecognition = new SpeechRecognition();
-  voiceRecognition.lang = 'en-US';
-  voiceRecognition.continuous = true;
-  voiceRecognition.interimResults = false;
-  voiceRecognition.onresult = event => {
-    const text = event.results[event.results.length - 1][0].transcript.toLowerCase();
-    setScanMessage('Heard: “' + text + '”');
-    if (/\b(repeat|again|why|help)\b/.test(text)) announceCurrentPrompt();
-    else if (/\b(next|continue|done)\b/.test(text)) nextFaceBtn?.click();
-    else if (/\b(stop|close)\b/.test(text)) {
-      stopCamera();
-      scanBackdrop.classList.remove('open');
-    }
-    else if (/\b(start|camera|scan)\b/.test(text) && !scanRunning) cameraStartBtn?.click();
-  };
-  voiceRecognition.onerror = event => setScanMessage('Voice recognition issue: ' + event.error + '. You can still use the on-screen buttons.');
-  voiceRecognition.onend = () => {
-    voiceOn = false;
-    if (voiceListenBtn) voiceListenBtn.textContent = '🎙 Start voice commands';
-  };
-  voiceRecognition.start();
-  voiceOn = true;
-  voiceListenBtn.textContent = 'Stop voice commands';
-  setScanMessage('Voice commands are listening. Try “repeat”, “why”, “next”, or “help”.');
-  speak('Voice commands are ready. Say repeat, why, next, or help.');
 });
 
 // Keep initial prompt labels in sync when the page opens.
