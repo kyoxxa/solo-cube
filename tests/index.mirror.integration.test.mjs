@@ -1,0 +1,10 @@
+import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
+assert.ok(html.includes("from './js/liveMirror.js'"),'index should use isolated live-mirror detector');
+assert.ok(html.includes('function monitorLiveMirror()'),'live monitor should be wired');
+assert.ok(html.includes('if(mirrorActive){monitorLiveMirror();return;}'),'camera loop should branch into mirror mode');
+assert.ok(html.includes("'Start live mirror'"),'validated scan should expose live mirror action');
+assert.ok(html.includes('inferVisibleFaceMove(mirrorState,visibleFace,observed'),'observations must be checked against the digital state');
+assert.ok(html.includes('scanStream&&!mirrorActive'),'only live mirror mode may animate while camera runs');
+console.log('INDEX MIRROR INTEGRATION: ALL PASS');
